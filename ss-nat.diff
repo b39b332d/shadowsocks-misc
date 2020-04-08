@@ -1,0 +1,130 @@
+15,16d14
+< googledns1=8.8.8.8;googledns2=8.8.4.4
+< 
+23,24c21
+<     Usage: ss-nat [-opc] [options]
+<            ss-nat -f
+---
+>     Usage: ss-nat [options]
+38,39d34
+<         -c <filename>		read configuration from /etc/shadowsocks-libev/filename.json
+<         other options will overload this config file
+42d36
+<         -p                      apply the rules to the PREROUTING chain 
+46,47d39
+<         -r                      change default dns server: 8.8.8.8 and 8.8.4.4
+<                                 (requires resolvconf.service)
+60c52
+< 	logger -st ss-nat[$$] -p$1 $2
+---
+> 	logger -st ss-rules[$$] -p$1 $2
+70,72d61
+< 
+<     test -f /run/resolvconf/interface/tun.ss || return 0
+<     resolvconf -d tun.ss
+74d62
+<     
+114c102
+<         IFNAME=${IFNAME:-eth0}
+---
+> 	IFNAME=${IFNAME:-eth0}
+119c107
+< 	[ $PREROUTING ] && $IPT -I PREROUTING 1 ${IFNAME:+-i $IFNAME} -p tcp $EXT_ARGS $MATCH_SET \
+---
+> 	$IPT -I PREROUTING 1 ${IFNAME:+-i $IFNAME} -p tcp $EXT_ARGS $MATCH_SET \
+128,160c116,126
+<   [ -n "$TPROXY" ] || return 0
+<   lsmod | grep -q TPROXY || modprobe xt_TPROXY || return 0
+<   ip rule add fwmark 0x01/0x01 table 100
+<   ip route add local 0.0.0.0/0 dev lo table 100
+< 
+<   local ipt="iptables -t mangle"
+<   $ipt -N SS_SPEC_TPROXY
+<   $ipt -I PREROUTING -p udp $EXT_ARGS $MATCH_SET \
+<     		-j SS_SPEC_TPROXY
+<   if [ $PREROUTING ]; then
+<     $ipt -A SS_SPEC_TPROXY ${IFNAME:+-i $IFNAME} -p udp -m set ! --match-set ss_spec_wan_ac dst \
+<     		-j TPROXY --on-port "$LOCAL_PORT" --tproxy-mark 0x01/0x01
+<   fi
+<   [ -z $OUTPUT ] || lo_rule
+<   return $?
+< }
+< 
+< lo_rule(){
+<   local ipt="iptables -t mangle"
+< 
+< # $ipt -A SS_SPEC_LOCAL -p udp -m udp --dport 53 -d 127.0.0.1  -j RETURN
+< # $ipt -A SS_SPEC_LOCAL -p udp -m udp --dport 53 -d $googledns1,$googledns2 -j MARK --set-mark 0x01 
+< # $ipt -A SS_SPEC_LOCAL -p udp -m udp --dport 53 -m mark ! --mark 0x1 -j DROP 
+< # $ipt -A SS_SPEC_LOCAL -p udp -m udp ! --dport 53 -m set ! --match-set ss_spec_wan_ac dst -j MARK --set-mark 0x01
+<   test -z $RESOLV || echo -e "nameserver $googledns1\nnameserver $googledns2\noptions timeout:2 attempts:2 rotate single-request-reopen" | resolvconf -a tun.ss
+<   $ipt -N SS_SPEC_LOCAL
+<   $ipt -A SS_SPEC_LOCAL -p udp -m udp --dport 53 -m set ! --match-set ss_spec_wan_ac dst \
+< 	  -j MARK --set-xmark 0x1/0xffffffff
+<   $ipt -I OUTPUT 1 -p udp -j SS_SPEC_LOCAL
+<   $ipt -A SS_SPEC_TPROXY -p udp -m mark --mark 0x1 \
+<     	-j TPROXY --on-port 1080 --on-ip 0.0.0.0 --tproxy-mark 0x1/0x1
+< 
+<   return $?
+---
+> 	lsmod | grep -q TPROXY || return 0
+> 	[ -n "$TPROXY" ] || return 0
+> 	ip rule add fwmark 0x01/0x01 table 100
+> 	ip route add local 0.0.0.0/0 dev lo table 100
+> 	local ipt="iptables -t mangle"
+> 	$ipt -N SS_SPEC_TPROXY
+> 	$ipt -A SS_SPEC_TPROXY -p udp -m set ! --match-set ss_spec_wan_ac dst \
+> 		-j TPROXY --on-port "$LOCAL_PORT" --tproxy-mark 0x01/0x01
+> 	$ipt -I PREROUTING 1 ${IFNAME:+-i $IFNAME} -p udp $EXT_ARGS $MATCH_SET \
+> 		-j SS_SPEC_TPROXY
+> 	return $?
+163d128
+< 
+206c171
+< while getopts ":s:l:S:L:i:I:e:a:b:c:w:opuUrfh" arg; do
+---
+> while getopts ":s:l:S:L:i:I:e:a:b:w:ouUfh" arg; do
+248,250d212
+< 		c)
+< 			CONFIG_FILE="$OPTARG"
+< 			;;
+254,256d215
+< 		p)
+< 			PREROUTING=1
+< 			;;
+263,265d221
+<         	r)  
+< 			RESOLV=1
+<                         ;;
+267c223,224
+< 			FLUSH_ONLY=1
+---
+> 			flush_r
+> 			exit 0
+275,293d231
+< if [ ! -z "$FLUSH_ONLY" ]; then
+<     flush_r
+<     exit 0
+< fi
+< 
+< 
+< if [ $CONFIG_FILE ]; then
+< 	[ -f $CONFIG_FILE ] || { echo "configruation file does not exist"; exit -1; }
+< 	[ "$PREROUTING" -o "$OUTPUT" ] || { cat $CONFIG_FILE |grep local.*address|grep -q 0.0.0.0 \
+< 		&& PREROUTING=1;OUTPUT=1; }
+< 	[ $TPROXY ] || { cat $CONFIG_FILE |grep mode|grep -q udp \
+< 		&& TPROXY=1 && RESOLV=1; }
+< 	[ $server ] || server=` cat $CONFIG_FILE |grep server\
+< 		|grep -oE "[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+" `
+< 	[ $local_port ] || local_port=` cat $CONFIG_FILE|grep local|grep -oE :[\s]*[0-9]+|grep -oE [0-9]+ `
+< 	[ $IFNAME ] || IFNAME=`ip address show|grep -E "inet [0-9]+\.[0-9]+\.[0-9]+\.1\/[0-9]+" \
+< 		|grep -v 127\.0\.0\.1 |awk '{print $NF}'`
+< fi
+< 
+296,301d233
+< fi
+< 
+< [ "$OUTPUT" -o "$PREROUTING" ] || usage 0
+< 
+< if [ ! -z "$RESOLV" ]; then
+<     systemctl is-active resolvconf.service > /dev/null 2>&1 || { RESOLV= ; echo "Because resolvconf.service is not running ,-r option is useless"; }
